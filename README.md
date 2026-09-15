@@ -4,7 +4,7 @@ Project structure is:
 rag-lesson-generator/
 ├── README.md
 ├── requirements.txt
-├── .env.example
+├── .env
 ├── main.py
 ├── list_models.py
 ├── src/
