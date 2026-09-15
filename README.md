@@ -1,166 +1,956 @@
+Project structure is:
+
+```text
+rag-lesson-generator/
+├── README.md
+├── requirements.txt
+├── .env.example
+├── main.py
+├── list_models.py
+├── src/
+│   ├── __init__.py
+│   ├── llm_client.py
+│   ├── generator.py
+│   ├── evaluator.py
+│   ├── rubric.py
+│   ├── memory.py
+│   └── orchestrator.py
+├── tests/
+│   └── test_pipeline.py
+├── logs/
+│   ├── rejection_log.jsonl
+│   └── memory.json
+└── output/
+    └── lesson_final.md
+```
+
+# README.md
+
+````markdown
 # Self-Evaluating Lesson Content Generator
 
-An agentic system that generates a beginner lesson on a given topic,
-judges its own output against a hard pass/fail rubric, and regenerates
-until it clears the bar — or gives up after a bounded number of retries
-and ships its best attempt with a full log of what it tried.
+An agentic GenAI system that generates beginner-friendly educational content, evaluates its own output against a strict PASS/FAIL rubric, regenerates failed content using targeted feedback, and remembers recurring failures across runs.
 
-Built for: **GenAI Engineer – Content Systems** take-home assessment.
-Submission topic: **Introduction to RAG (Retrieval-Augmented Generation)**.
+Built for the **GenAI Engineer – Content Systems** take-home assessment.
+
+### Demonstration Topic
+
+**Introduction to RAG (Retrieval-Augmented Generation)**
 
 ---
 
-## 1. Architecture
+## 🚀 What This Project Does
 
+This project is more than a simple LLM-based content generator.
+
+It implements a feedback-driven agentic workflow:
+
+```text
+                    INPUT
+                      │
+                      ▼
+          "Introduction to RAG"
+                      │
+                      ▼
+              ┌──────────────┐
+              │   GENERATE   │
+              │  Lesson Draft│
+              └──────┬───────┘
+                     │
+                     ▼
+              ┌──────────────┐
+              │   EVALUATE   │
+              │  PASS / FAIL │
+              └──────┬───────┘
+                     │
+                ┌────┴────┐
+                │         │
+              PASS       FAIL
+                │         │
+                ▼         ▼
+              Finish   Record Failure
+                          │
+                          ▼
+                  Build Targeted
+                     Feedback
+                          │
+                          ▼
+                    REGENERATE
+                          │
+                          └──────────► EVALUATE
+````
+## 📊 Example Runs
+
+The following screenshot shows two possible outcomes:
+
+1. **First-attempt success:** the generated lesson passes all rubric
+   checkpoints immediately.
+
+2. **Self-correction:** the first attempt fails a rubric checkpoint,
+   the evaluator identifies the problem, targeted feedback is sent to
+   the generator, and the regenerated lesson passes on the second attempt.
+
+<img width="1262" height="356" alt="image" src="https://github.com/user-attachments/assets/8d5788c5-e390-40f4-8731-90233b684f7b" />
+
+
+The system terminates when:
+
+* All rubric checkpoints PASS, or
+* The maximum retry limit is reached.
+
+---
+
+# 🎯 Problem Statement
+
+Large Language Models can generate educational content quickly, but a generated lesson may contain:
+
+* Incorrect information
+* Unexplained technical terms
+* Complex language
+* Missing examples
+* Poor teaching flow
+* Missing important concepts
+
+Instead of blindly accepting the first LLM response, this project introduces a **self-evaluation and refinement loop**.
+
+The system asks:
+
+> "Does this generated lesson actually satisfy the requirements?"
+
+If the answer is no, the evaluator explains what failed and the generator receives that feedback to create an improved version.
+
+---
+
+# 👨‍🎓 Target Learner
+
+The generated lesson is designed for:
+
+* A 12th-grade graduate from India
+* Limited English vocabulary
+* Non-English-medium educational background
+* No previous technical knowledge
+* Interested in starting a career in AI
+
+The generator therefore prioritizes simple language, short sentences, clear explanations, examples, and a gradual teaching flow.
+
+---
+
+# 🧠 Agentic Workflow
+
+The project follows a **Generate → Evaluate → Decide → Regenerate** pattern.
+
+### 1. Generate
+
+The LLM generates a beginner-friendly lesson for the requested topic.
+
+### 2. Evaluate
+
+A separate evaluation step checks the lesson against six hard PASS/FAIL checkpoints.
+
+### 3. Decide
+
+The orchestrator checks the evaluation result.
+
+```text
+All checks PASS
+      ↓
+Accept lesson
+
+Any check FAIL
+      ↓
+Regenerate
 ```
-            ┌────────────┐
-   topic ─▶ │  GENERATE  │◀───────────────┐
-            └─────┬──────┘                │
-                   │ lesson draft         │ targeted feedback
-                   ▼                      │ (which checks failed + why)
-            ┌────────────┐                │
-            │  EVALUATE  │────fail────────┘
-            └─────┬──────┘
-                   │ pass, OR retries exhausted
+
+### 4. Regenerate
+
+The failed checkpoint and its reason are converted into targeted feedback.
+
+Instead of simply telling the model:
+
+> "Try again."
+
+the system provides:
+
+```text
+Failed Check
++
+Exact Requirement
++
+Reason for Failure
+```
+
+This allows the next generation to focus specifically on the detected problem.
+
+### 5. Remember
+
+Failures are stored in persistent memory.
+
+Recurring failures are then supplied to future generation prompts as warnings.
+
+---
+
+# 📋 Evaluation Rubric
+
+The evaluator uses six binary checkpoints.
+
+There is **no partial credit**.
+
+## 1. Accurate & Grounded
+
+The lesson must contain technically correct information and should not invent facts, numbers, APIs, or mechanisms.
+
+## 2. Beginner-Friendly Language
+
+The lesson should use short sentences and simple vocabulary suitable for the target learner.
+
+## 3. Teaches By Example
+
+The lesson must contain at least one concrete example, analogy, scenario, or walkthrough.
+
+## 4. No Unexplained Jargon
+
+Technical terms must be explained in simple language when they are first introduced.
+
+## 5. Covers the Key Points
+
+The lesson must explain:
+
+* What it is
+* Why it matters
+* How it works
+
+## 6. Coherent Teaching Flow
+
+The lesson should move logically from simple concepts to more complex concepts without introducing unexplained ideas too early.
+
+---
+
+# 🏗️ Project Architecture
+
+```text
+                         USER
+                           │
+                           ▼
+                   Topic / Input
+                           │
+                           ▼
+                ┌──────────────────┐
+                │  orchestrator.py │
+                │  Agent Controller│
+                └────────┬─────────┘
+                         │
+                         ▼
+                ┌──────────────────┐
+                │   generator.py   │
+                │  Generate Lesson │
+                └────────┬─────────┘
+                         │
+                         ▼
+                ┌──────────────────┐
+                │  llm_client.py   │
+                │    Groq / LLM    │
+                └────────┬─────────┘
+                         │
+                         ▼
+                    Lesson Draft
+                         │
+                         ▼
+                ┌──────────────────┐
+                │   evaluator.py   │
+                │    LLM-as-Judge  │
+                └────────┬─────────┘
+                         │
+                         ▼
+                ┌──────────────────┐
+                │    rubric.py     │
+                │   6 PASS/FAIL    │
+                │    Checkpoints   │
+                └────────┬─────────┘
+                         │
+                    PASS / FAIL
+                     ↙       ↘
+                  PASS       FAIL
+                   │           │
+                   │           ▼
+                   │     ┌────────────┐
+                   │     │ memory.py  │
+                   │     │ Store Fail │
+                   │     └─────┬──────┘
+                   │           │
+                   │           ▼
+                   │     Targeted Feedback
+                   │           │
+                   │           ▼
+                   │       Regenerate
+                   │           │
+                   │           └──────► Evaluate
+                   │
                    ▼
-            ┌────────────┐
-            │   OUTPUT    │ → final lesson + rejection_log.jsonl
-            └────────────┘
-
-            Cross-run: every failure is written to logs/memory.json.
-            The next GENERATE call for ANY topic is pre-warned with the
-            most common past failure reasons, so the system gets sharper
-            over time without hand-editing prompts.
+               Final Lesson
 ```
 
-**Components** (`src/`):
+---
 
-| File | Responsibility |
-|---|---|
-| `rubric.py` | The 6 hard pass/fail checkpoints, as data (not hardcoded into prompts) |
-| `generator.py` | Builds the generation prompt (fresh or with retry feedback + memory notes) and calls the LLM |
-| `evaluator.py` | LLM-as-judge: scores the lesson against every rubric item, PASS/FAIL + one-line reason each, no partial credit |
-| `memory.py` | Persists failure patterns across runs (`logs/memory.json`) and surfaces the top recurring ones |
-| `orchestrator.py` | The generate → evaluate → regenerate loop; guarantees termination at `1 + MAX_RETRIES` attempts |
-| `llm_client.py` | Only place that talks to the LLM provider — swap providers/models here only |
+# 📁 File-by-File Explanation
 
-`main.py` is the CLI entry point. `tests/test_pipeline.py` covers the
-prompt-building and loop-termination logic with the LLM mocked out (no
-API key needed to run tests).
+## `main.py`
 
-## 2. Design decisions & trade-offs
+The CLI entry point of the application.
 
-**Why hard pass/fail per checkpoint instead of a 1–10 score?**
-A score is ambiguous to act on ("6/10 — good enough?"). A checklist of
-booleans is directly actionable: a FAIL tells the generator exactly
-which sentence-level habit to fix next, and the loop has an
-unambiguous stopping condition (`all_passed`).
+It:
 
-**Why LLM-as-judge instead of regex/heuristics?**
-Every checkpoint here is semantic ("is this jargon explained in plain
-language?", "is this example concrete?"). These don't reduce to string
-matching. The trade-off is judge reliability — mitigated by: (a) a
-strict system prompt with an explicit "no partial credit" instruction,
-(b) forcing structured JSON output so failures can't hide in prose,
-and (c) treating a missing/omitted check_id as an automatic FAIL so a
-judge that silently drops a checkpoint can never let a bad lesson
-through.
+1. Accepts the topic from the command line.
+2. Creates the lesson pipeline.
+3. Runs the agentic workflow.
+4. Saves the final lesson.
+5. Displays the final status.
+6. Reports the locations of the output and rejection log.
 
-**Why max 1–2 retries, not unbounded?**
-The assignment requires the loop to always terminate. Unbounded
-regeneration also risks the generator overfitting to the judge's exact
-phrasing rather than genuinely improving. Two retries is enough to fix
-concrete, named failures without spiraling.
-
-**Why memory across runs, not just within a run?**
-Within-run feedback fixes *this* lesson. Cross-run memory
-(`logs/memory.json`) fixes the *system*: if "unexplained jargon" is the
-most common failure across many topics, every future first draft gets
-pre-warned about it — this is the self-evolving piece, separate from
-the single-run retry loop.
-
-**Why a flat JSON file for memory/logs, not a DB or vector store?**
-Right-sized for a single-user take-home. The interfaces
-(`memory.record_failures` / `memory.get_top_failure_notes`) are the
-seam — swapping in SQLite or a vector store for semantic similarity
-search over past failures (instead of exact check_id counting) is a
-contained change, not a rewrite.
-
-## 3. Setup
-
-```bash
-git clone <your-repo-url>
-cd rag-lesson-generator
-pip install -r requirements.txt
-cp .env.example .env
-# edit .env and paste your ANTHROPIC_API_KEY
-```
-
-### Where to get an LLM / API key
-- **Groq (default, used by this project, free):** create a free key at
-  https://console.groq.com/keys — no credit card required. Groq hosts
-  open models (Llama 3.3, etc.) and serves them free with generous
-  rate limits. Check https://console.groq.com/docs/models for the
-  current free model list if `llama-3.3-70b-versatile` in
-  `.env.example` has changed by the time you read this.
-- **Alternative providers:** the system only touches the LLM through
-  `src/llm_client.py`, so swapping to Anthropic, OpenAI, Gemini, or a
-  local model via Ollama means rewriting just that one file's
-  `call_llm` / `call_llm_json` functions — nothing else in the
-  pipeline needs to change.
-
-## 4. Run it
+Example:
 
 ```bash
 python main.py --topic "RAG (Retrieval-Augmented Generation)"
 ```
 
-Outputs:
-- `output/lesson_final.md` — the passing lesson (or best-effort if retries ran out)
-- `logs/rejection_log.jsonl` — one JSON line per attempt: what failed, why, timestamp
-- `logs/memory.json` — accumulating cross-run failure memory
+---
 
-Run tests (no API key required — LLM calls are mocked):
+## `src/llm_client.py`
+
+The LLM provider abstraction layer.
+
+This is the only component that directly communicates with the LLM provider.
+
+Currently:
+
+```text
+Provider: Groq
+Model: configured through MODEL_NAME
+```
+
+It provides two main interfaces:
+
+### `call_llm()`
+
+Used for normal text generation.
+
+### `call_llm_json()`
+
+Used when the evaluator needs structured JSON output.
+
+Keeping the provider interaction isolated means another model provider can be integrated without rewriting the rest of the pipeline.
+
+---
+
+## `src/generator.py`
+
+Responsible for generating the educational lesson.
+
+The generator prompt defines:
+
+* Target learner
+* Simple language requirements
+* Technical term explanations
+* Example/analogy requirement
+* What → Why → How structure
+* Simple → Complex teaching flow
+
+It also accepts:
+
+```text
+memory_notes
+feedback
+```
+
+Therefore, regeneration is targeted instead of being a random second generation.
+
+---
+
+## `src/rubric.py`
+
+Contains the six evaluation checkpoints.
+
+The rubric is stored as structured data rather than being duplicated throughout the application.
+
+This makes the evaluation criteria:
+
+* Explicit
+* Easy to modify
+* Reusable by the evaluator
+* Easy to inspect during the walkthrough
+
+---
+
+## `src/evaluator.py`
+
+Acts as the quality-control component.
+
+It uses an **LLM-as-a-Judge** approach.
+
+The evaluator receives:
+
+```text
+Topic
++
+Generated Lesson
++
+Rubric
+```
+
+and returns structured results:
+
+```json
+{
+  "checks": {
+    "accurate_grounded": {
+      "pass": true,
+      "reason": "..."
+    },
+    "teaches_by_example": {
+      "pass": false,
+      "reason": "..."
+    }
+  }
+}
+```
+
+Every checkpoint must be evaluated.
+
+If the model accidentally omits a checkpoint, the implementation treats that missing checkpoint as a FAIL rather than allowing an incomplete evaluation to pass.
+
+---
+
+## `src/orchestrator.py`
+
+This is the main controller of the agentic workflow.
+
+It coordinates:
+
+```text
+Generate
+   ↓
+Evaluate
+   ↓
+Decision
+   ↓
+Record failure
+   ↓
+Create feedback
+   ↓
+Regenerate
+   ↓
+Evaluate again
+```
+
+It also:
+
+* Controls the retry limit
+* Maintains attempt history
+* Writes the rejection log
+* Sends targeted feedback to the generator
+* Stops when the lesson passes
+* Stops when the retry limit is reached
+
+### Demo Mode
+
+The project also contains a demo-only mechanism:
+
+```text
+DEMO_FORCE_FIRST_FAIL=true
+```
+
+This is used to reliably demonstrate the retry workflow during a walkthrough.
+
+The real evaluator still runs first.
+
+The demo mechanism only forces a first-attempt failure when the real evaluator would otherwise have passed, allowing the video to demonstrate:
+
+```text
+Attempt 1 → FAIL
+             ↓
+        Regenerate
+             ↓
+Attempt 2 → PASS
+```
+
+This mechanism is intended only for demonstrating the control flow.
+
+---
+
+## `src/memory.py`
+
+Implements cross-run persistent memory.
+
+Whenever a rubric checkpoint fails, the system stores:
+
+```text
+Topic
+Check ID
+Failure Reason
+```
+
+in:
+
+```text
+logs/memory.json
+```
+
+The most frequent previous failure patterns are then surfaced to the generator before a new lesson is created.
+
+This creates two levels of learning:
+
+### Within a run
+
+```text
+FAIL → Feedback → Regenerate
+```
+
+### Across runs
+
+```text
+Past failures
+      ↓
+Persistent memory
+      ↓
+Future generation warnings
+      ↓
+Better first drafts
+```
+
+This cross-run behavior is the **self-evolving** component of the system.
+
+---
+
+# 📄 Output Files
+
+The system produces three important artifacts.
+
+## `output/lesson_final.md`
+
+Contains the final accepted lesson.
+
+For this assignment, the lesson covers:
+
+**Retrieval-Augmented Generation (RAG)**
+
+The generated lesson explains:
+
+* What RAG is
+* Why it matters
+* How retrieval and generation work
+* Simple examples and analogies
+
+---
+
+## `logs/rejection_log.jsonl`
+
+Contains an audit trail of generation attempts.
+
+Each line represents one attempt.
+
+It records information such as:
+
+```json
+{
+  "attempt": 1,
+  "timestamp": "...",
+  "topic": "RAG",
+  "passed": false,
+  "checks": {
+    "...": "..."
+  }
+}
+```
+
+This makes it possible to see:
+
+```text
+Attempt 1
+   ↓
+What failed?
+   ↓
+Why did it fail?
+   ↓
+Attempt 2
+   ↓
+Did it pass?
+```
+
+---
+
+## `logs/memory.json`
+
+Contains persistent failure memory across runs.
+
+Example:
+
+```json
+{
+  "failures": [
+    {
+      "topic": "RAG",
+      "check_id": "accurate_grounded",
+      "reason": "Contains a made-up fact."
+    }
+  ]
+}
+```
+
+The memory is then used to warn the generator about recurring mistakes.
+
+---
+
+# 🔍 Example Demonstrations
+
+The project can demonstrate two different outcomes.
+
+## Case 1 — Passes on First Attempt
+
+```text
+INPUT
+  ↓
+Generate
+  ↓
+Evaluate
+  ↓
+All 6 checks PASS
+  ↓
+FINAL LESSON
+```
+
+Example:
+
+```text
+Attempt 1 → PASS ✅
+```
+
+This is the ideal path when the first generated lesson already satisfies the rubric.
+
+---
+
+## Case 2 — Fails First, Then Passes
+
+```text
+INPUT
+  ↓
+Generate
+  ↓
+Evaluate
+  ↓
+❌ FAIL
+  ↓
+Failure reason recorded
+  ↓
+Targeted feedback
+  ↓
+Regenerate
+  ↓
+Evaluate
+  ↓
+✅ PASS
+  ↓
+FINAL LESSON
+```
+
+Example:
+
+```text
+Attempt 1 → FAIL ❌
+              ↓
+       Targeted feedback
+              ↓
+         Regeneration
+              ↓
+Attempt 2 → PASS ✅
+```
+
+This demonstrates the main self-evaluation and regeneration capability of the system.
+
+---
+
+# 🧠 Why These Design Decisions?
+
+## Why PASS/FAIL instead of a 1–10 score?
+
+A score such as `7/10` is ambiguous.
+
+The system needs an actionable decision:
+
+```text
+PASS → Accept
+FAIL → Fix
+```
+
+Binary checkpoints make the workflow easier to automate.
+
+---
+
+## Why LLM-as-a-Judge?
+
+The rubric contains semantic requirements.
+
+For example:
+
+> "Is the technical term properly explained?"
+
+or:
+
+> "Is the example concrete and useful?"
+
+These are difficult to reliably evaluate using simple keyword matching or regular expressions.
+
+The LLM can evaluate the meaning and context of the lesson.
+
+---
+
+## Why targeted feedback?
+
+Instead of regenerating blindly, the system provides:
+
+```text
+Failed checkpoint
++
+Required behavior
++
+Reason for failure
+```
+
+This gives the generator a specific correction to make.
+
+---
+
+## Why bounded retries?
+
+The pipeline uses a maximum retry count.
+
+This prevents:
+
+* Infinite LLM calls
+* Uncontrolled API usage
+* Endless regeneration
+* Overfitting to evaluator wording
+
+The system eventually terminates even if every attempt fails.
+
+---
+
+## Why persistent memory?
+
+Retry feedback fixes the current lesson.
+
+Persistent memory helps future lessons.
+
+For example:
+
+```text
+Run 1:
+"Unexplained jargon" → FAIL
+
+Run 2:
+Generator receives a warning about jargon
+
+Run 3:
+Same warning remains available
+```
+
+This allows the system to improve its behavior across runs without manually editing the generation prompt.
+
+---
+
+## Why JSON memory instead of a database?
+
+This project is designed as a focused take-home implementation.
+
+A flat JSON file is simple and sufficient for a single-user workflow.
+
+For a production system, the memory layer could be replaced with:
+
+* SQLite
+* PostgreSQL
+* Vector database
+* Semantic similarity search
+
+without changing the overall agent architecture.
+
+---
+
+# 🤖 LLM / Groq
+
+This project uses **Groq** as the LLM API provider.
+
+The Groq API key is stored in the local `.env` file:
+
+```text
+GROQ_API_KEY=your_key_here
+```
+
+The model is configured using:
+
+```text
+MODEL_NAME=your_available_model
+```
+
+The application loads these values using environment variables.
+
+### Important
+
+The real API key should **never be committed to GitHub**.
+
+Use:
+
+```text
+.env
+```
+
+locally and provide:
+
+```text
+.env.example
+```
+
+for other users.
+
+---
+
+# ⚙️ Installation
+
+Clone the repository:
+
+```bash
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd rag-lesson-generator
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Create your environment file:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell, you can also create the `.env` file manually.
+
+Add your Groq API key:
+
+```text
+GROQ_API_KEY=your_groq_api_key
+MODEL_NAME=your_available_groq_model
+MAX_RETRIES=2
+```
+
+---
+
+# ▶️ Run the Project
+
+Run with the default topic:
+
+```bash
+python main.py
+```
+
+Or provide a topic:
+
+```bash
+python main.py --topic "RAG (Retrieval-Augmented Generation)"
+```
+
+The final lesson will be saved to:
+
+```text
+output/lesson_final.md
+```
+
+The rejection history will be saved to:
+
+```text
+logs/rejection_log.jsonl
+```
+
+Persistent failure memory will be saved to:
+
+```text
+logs/memory.json
+```
+
+---
+
+# 🧪 Run Tests
+
+The project includes lightweight tests that mock the LLM calls.
+
+This means the control-flow tests do not require an API key.
+
+Run:
+
 ```bash
 python -m pytest tests/ -v
 ```
 
-## 5. Project structure
+The tests cover:
 
-```
-rag-lesson-generator/
-├── README.md
-├── requirements.txt
-├── .env.example
-├── main.py                    # CLI entry point
-├── src/
-│   ├── __init__.py
-│   ├── llm_client.py          # provider wrapper (only file that calls the LLM API)
-│   ├── rubric.py               # the 6 pass/fail checkpoints, as data
-│   ├── generator.py            # builds prompts + generates lesson drafts
-│   ├── evaluator.py             # LLM-as-judge against the rubric
-│   ├── memory.py                 # cross-run failure memory
-│   └── orchestrator.py           # generate → evaluate → regenerate loop
-├── tests/
-│   └── test_pipeline.py        # mocked unit tests, no API key needed
-├── logs/                        # created at runtime
-│   ├── rejection_log.jsonl
-│   └── memory.json
-└── output/                      # created at runtime
-    └── lesson_final.md
+* Generation prompt feedback
+* Memory notes
+* Rubric completeness
+* Retry termination
+* Early termination on PASS
+* Demo FAIL → PASS behavior
+
+---
+
+# 🔐 Security
+
+Do not commit:
+
+```text
+.env
 ```
 
-## 6. What's still needed from you for the submission
+or any file containing your real Groq API key.
 
-The assignment asks for 3 deliverables — this repo covers #1:
+Use `.env.example` to show the required configuration without exposing credentials.
 
-1. **GitHub repo** ✅ this project — push it, this README doubles as setup docs.
-2. **Document (Google Doc / Notion)** — paste the final `output/lesson_final.md`
-   content plus a short "how I designed the rubric and why" section (you can
-   lift straight from "Design decisions & trade-offs" above and adapt in
-   your own words).
-3. **Loom video (15–20 min)** — walk through: this architecture diagram,
-   one live run showing a FAIL → regenerate → PASS cycle (deliberately
-   loosen a rubric wording first if your first real run passes on attempt
-   1, so the retry path is visible on camera), then `rejection_log.jsonl`
-   and `memory.json` to show the audit trail and cross-run learning.
+---
+
+# 📌 Technology Stack
+
+| Component            | Technology                        |
+| -------------------- | --------------------------------- |
+| Programming Language | Python                            |
+| LLM Provider         | Groq                              |
+| LLM                  | Configurable through `MODEL_NAME` |
+| Agent Pattern        | Generate → Evaluate → Regenerate  |
+| Evaluation           | LLM-as-a-Judge                    |
+| Rubric               | Binary PASS/FAIL                  |
+| Memory               | JSON                              |
+| Rejection Log        | JSONL                             |
+| Lesson Output        | Markdown                          |
+| Testing              | Pytest with mocked LLM calls      |
+| Configuration        | Python dotenv                     |
+
+---
+
+# 🔮 Future Improvements
+
+If this system were taken toward production, possible improvements would include:
+
+* Replace JSON memory with a database
+* Add semantic similarity search over previous failures
+* Use separate models for generation and evaluation
+* Add evaluator confidence and consistency checks
+* Add a web UI
+* Add observability and token/cost tracking
+* Add versioning for prompts and rubrics
+* Add human review for low-confidence evaluations
+* Support multiple lesson formats and learner profiles
+
+---
+
+# 👤 Author
+
+**Rama Sai Mehar Sreerama**
+
+GenAI / AI-ML Engineer
