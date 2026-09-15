@@ -1,0 +1,9 @@
+{
+  "failures": [
+    {
+      "topic": "RAG (Retrieval-Augmented Generation)",
+      "check_id": "accurate_grounded",
+      "reason": "Contains a made\u2011up fact (fictional Nobel winner)."
+    }
+  ]
+}
